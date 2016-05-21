@@ -304,7 +304,7 @@ class Traces(object):
             for index, item in enumerate(trace.split("_")):
                 if output_file_name[index] != item:
                     output_file_name[index] = 'multi'
-        return str('_').join(output_file_name)
+        return str('_').join(output_file_name).replace('.gz', '')
 
     def stat(self):
         """ Show all statistics """
@@ -313,7 +313,6 @@ class Traces(object):
 
     def plot_table_x_y(self, table_name, x_column_name, y_column_name):
         """ Plot traces """
-
         # Output to static HTML file
         output_file_name = self.get_output_file_name()
         output_file_name += "_" + y_column_name + "_" + x_column_name
@@ -416,15 +415,13 @@ class Traces(object):
         show(plots)
 
     def plotPipeline(self, cu_id):
-
         # Output to static HTML file
-        prefix = self.trace_files[0].split('_')
-        output_file_name = prefix[0] + "_pipeline"
+        output_file_name = self.get_output_file_name()
+        output_file_name += "_pipeline"
         if int(cu_id) != -1:
             output_file_name += '_cu_' + str(cu_id) + "_"
         else:
             output_file_name += '_all_cu_'
-        output_file_name += prefix[4]
         output_file(output_file_name + '.html', title=output_file_name)
 
         # List of figures
@@ -543,9 +540,8 @@ class Traces(object):
 
     def plotMemory(self, mode='stat'):
         # Output to static HTML file
-        prefix = self.trace_files[0].split('_')
-        output_file_name = prefix[0] + "_memory_" + mode + "_"
-        output_file_name += prefix[4]
+        output_file_name = self.get_output_file_name()
+        output_file_name += "_memory_" + mode
         output_file(output_file_name + '.html', title=output_file_name)
 
         # List of figures
