@@ -42,27 +42,6 @@ class Trace(object):
         except IndexError:
             return 'na'
 
-    def get_name_gpu_config(self):
-        """ Get name of GPU configuration from file name """
-        try:
-            return self.__file_name.split('_')[0]
-        except IndexError:
-            return 'na'
-
-    def get_name_kernel(self):
-        """ Get name of kernel from file name """
-        try:
-            return self.__file_name.split('_')[1]
-        except IndexError:
-            return 'na'
-
-    def get_name_instruction_scheduler(self):
-        """ Get name of instruction scheduler from file name """
-        try:
-            return self.__file_name.split('_')[3]
-        except IndexError:
-            return 'na'
-
     def get_work_size(self):
         """ Get workload length from file name """
         return str(self.__file_name.split('_')[4])
@@ -270,14 +249,14 @@ class Trace(object):
             # Ignore NaN
             if mean == mean and median == median:
                 # Insert mean
-                col_sched.append(self.get_name_instruction_scheduler())
+                col_sched.append(self.get_file_name())
                 col_location.append(key)
                 col_value.append(mean)
                 col_type.append('Mean')
                 col_color.append(color)
 
                 # Insert median
-                col_sched.append(self.get_name_instruction_scheduler())
+                col_sched.append(self.get_file_name())
                 col_location.append(key)
                 col_value.append(median)
                 col_type.append('Median')
@@ -319,6 +298,14 @@ class Traces(object):
             trace = Trace(trace_file)
             self.traces.append(trace)
 
+    def get_output_file_name(self):
+        output_file_name = self.trace_files[0].split('_')
+        for trace in self.trace_files:
+            for index, item in enumerate(trace.split("_")):
+                if output_file_name[index] != item:
+                    output_file_name[index] = 'multi'
+        return str('_').join(output_file_name)
+
     def stat(self):
         """ Show all statistics """
         for trace in self.traces:
@@ -328,10 +315,8 @@ class Traces(object):
         """ Plot traces """
 
         # Output to static HTML file
-        prefix = self.trace_files[0].split('_')
-        output_file_name = prefix[0] + "_"
-        output_file_name += y_column_name + "_" + x_column_name
-        output_file_name += "_" + prefix[4]
+        output_file_name = self.get_output_file_name()
+        output_file_name += "_" + y_column_name + "_" + x_column_name
         output_file(output_file_name + '.html', title=output_file_name)
 
         # List of figures
@@ -525,9 +510,8 @@ class Traces(object):
 
     def plot_memory_hist(self, mode='overview'):
         # Output to static HTML file
-        prefix = self.trace_files[0].split('_')
-        output_file_name = prefix[0] + "_memory_hist_" + mode + "_"
-        # output_file_name += prefix[4]
+        output_file_name = self.get_output_file_name()
+        output_file_name += "_memory_hist_" + mode
         output_file(output_file_name + '.html', title=output_file_name)
 
         # List of histogram figures
