@@ -51,10 +51,7 @@ class Report(object):
         my_df = self.__dataframe
         other_df = other.get_dataframe()
 
-        col_index = ['GPUConf',
-                     'InstSched',
-                     'WorkSize',
-                     'ModuleName',
+        col_index = ['ModuleName',
                      'ModuleId',
 
                      'Sets',
@@ -431,50 +428,27 @@ class Reports(object):
             for index in range(1, len(self.__reports)):
                 self.__reports[index].substract(self.__reports[0])
 
+    def __get_output_file_name(self):
+        output_file_name = self.__report_files[0].split('_')
+        for report in self.__report_files:
+            for index, item in enumerate(report.split("_")):
+                if output_file_name[index] != item:
+                    output_file_name[index] = 'multi'
+        return str('_').join(output_file_name).replace('.rpt', '')
+
     def __save_html(self):
-        output_file_name = 'mem_'
+        # File name
+        output_file_name = 'mem_' + self.__get_output_file_name()
 
         # Raw data or substracted data
         if self.__is_sub:
-            output_file_name += 'sub_'
+            output_file_name += '_sub'
         else:
-            output_file_name += 'raw_'
+            output_file_name += '_raw'
+        output_file_name += '.html'
 
         # Title
         output_file_title = 'Mem report: '
-
-        gpu_conf = {}
-        schedule = {}
-        workload = {}
-
-        for report_file in self.__report_files:
-            meta = report_file.split('.')[0].split("_")
-            gpu_conf[meta[0]] = 1
-            schedule[meta[2]] = 1
-            workload[meta[3]] = 1
-
-        suffix = ''
-        if len(gpu_conf) >= 5:
-            suffix += str(len(gpu_conf)) + '_gpu_confs'
-        else:
-            for key in gpu_conf.keys():
-                suffix += key + '_'
-
-        if len(schedule) >= 5:
-            suffix += str(len(schedule)) + '_schedules'
-        else:
-            for key in schedule.keys():
-                suffix += key + '_'
-
-        if len(workload) >= 5:
-            suffix += str(len(workload)) + '_workloads'
-        else:
-            for key in workload.keys():
-                suffix += key + '_'
-
-        output_file_name += suffix
-        output_file_title += suffix
-        output_file_name += '.html'
         output_file(output_file_name, title=output_file_title)
 
     def plot(self):

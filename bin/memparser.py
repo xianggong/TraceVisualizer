@@ -4,9 +4,6 @@ import re
 import pandas as pd
 
 INDEX = [
-    'GPUConf',
-    'InstSched',
-    'WorkSize',
     'ModuleName',
     'ModuleId',
 
@@ -75,16 +72,13 @@ def __parse(report_file):
             break
 
         # Get module name
-        module = re.search(r'[\[]\s(?P<module_name>\w+\-\w+)\s[\]]', line)
-        module_name = module.groupdict()['module_name'] if module else None
-        if module_name:
-            report_conf = report_file.split('.')[0].split('_')
-            mem_info[module_name] = [report_conf[0],
-                                     report_conf[2],
-                                     report_conf[3],
-                                     module_name.split('-')[0],
-                                     module_name.split('-')[1]]
-            curr_module = module_name
+        module = re.search(r'[\[]\s(?P<name>\w+(\-\w+)*)\-(?P<id>\w+)\s[\]]',
+                           line)
+        module_name = module.groupdict()['name'] if module else None
+        module_id = module.groupdict()['id'] if module else None
+        if module_name and module_id:
+            curr_module = module_name + '-' + module_id
+            mem_info[curr_module] = [module_name, module_id]
             continue
 
         # Process statistic
