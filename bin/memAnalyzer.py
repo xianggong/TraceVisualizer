@@ -25,7 +25,7 @@ SCREEN_WIDTH = 1560
 defaults.width = int(SCREEN_WIDTH * 0.22)
 defaults.height = int(SCREEN_WIDTH * 0.22)
 
-ENABLE_SEABORN = True
+ENABLE_SEABORN = False
 
 
 def is_all_zeros(column):

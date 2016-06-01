@@ -485,7 +485,7 @@ class Traces(object):
                          y1=y_axis,
                          line_width=1,
                          legend=trace.get_file_name(),
-                         color=trace._color)
+                         color=trace.get_color())
             plot.legend.location = "top_left"
 
             all_in_one.segment(x0=df["cycle_start"],
@@ -494,7 +494,7 @@ class Traces(object):
                                y1=y_axis,
                                line_width=1,
                                legend=trace.get_file_name(),
-                               color=trace._color)
+                               color=trace.get_color())
             all_in_one.legend.location = "top_left"
 
             figures.append(plot)
