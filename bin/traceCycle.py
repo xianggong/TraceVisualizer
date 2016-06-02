@@ -11,6 +11,9 @@ from bokeh.io import gridplot
 import tracemisc as tm
 import tracedatabase as td
 
+FIGURE_WIDTH = 1100
+FIGURE_HEIGHT = 450
+
 
 class TraceCycleFigures(object):
     """TraceCycleFigures contains figures related to cycle tables """
@@ -71,13 +74,16 @@ class TraceCycleFigures(object):
         for item in metadata:
             if item[1] != 'cycle':
                 column_list.append(item[1])
-        return column_list
+        return sorted(column_list)
 
     def get_table_list(self):
         """Get all tables as a list"""
         cursor = self.__database.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        return cursor.fetchall()
+        table_list = []
+        for item in cursor.fetchall():
+            table_list.append(item[0])
+        return sorted(table_list)
 
     def plot_t_x_y(self, width, height,
                    table, x_column, y_column,
@@ -133,7 +139,7 @@ class TraceCycleFigures(object):
                               color=plot_color,
                               title=hist_title)
 
-        return (plot_color, plot, plot_hist)
+        return (plot, plot_hist)
 
     def plot_t_x_multi(self, width, height,
                        table, x_column, y_column_list,
@@ -142,7 +148,7 @@ class TraceCycleFigures(object):
         figures_vertical = []
 
         for y_column in sorted(y_column_list):
-            color, plot, plot_hist = self.plot_t_x_y(
+            plot, plot_hist = self.plot_t_x_y(
                 width, height, table, x_column, y_column, x_range, y_range)
             figures_vertical.append([plot, plot_hist])
         return figures_vertical
@@ -161,28 +167,59 @@ class TraceCyclePlot(object):
     """Draw figures to file"""
 
     def __init__(self, trace, table, xaxis, yaxis):
-        self.__trace = trace
-        self.__table = table
+        self.__trace = trace.split('.')[0]
+        self.__figures = TraceCycleFigures(trace)
+
+        # Table and Yaxis can be a list
+        self.__table = None
         self.__xaxis = xaxis
-        self.__yaxis = []
-        self.__figures = TraceCycleFigures(self.__trace)
+        self.__yaxis = None
 
-        table = ''
-        if type(self.__table) == list:
-            table = self.__table[0]
-        else:
-            table = table
+        # Draw function, default to draw selected columns in one table
+        self.__draw_func = self.__draw_table_columns
 
-        for item in yaxis:
-            if '*' not in item:
-                self.__yaxis.append(item)
+        # Check tables
+        trace_tables = self.__figures.get_table_list()
+        valid_tables = []
+        for item in table:
+            if '*' not in item and item in trace_tables:
+                valid_tables.append(item)
             else:
-                for column in self.__figures.get_column_list(table):
-                    if column.startswith(item[:-1]):
-                        self.__yaxis.append(column)
+                for table in trace_tables:
+                    if item[:-1] in table:
+                        valid_tables.append(table)
 
-    def draw(self):
-        """ Show the figures """
+        # Sanity check, at least 1 valid table
+        if len(valid_tables) == 0:
+            print 'No valid table found in trace'
+            return
+
+        # Check columns
+        trace_columns = self.__figures.get_column_list(valid_tables[0])
+        valid_columns = []
+        for item in yaxis:
+            if '*' not in item and item in trace_columns:
+                valid_columns.append(item)
+            else:
+                for table in trace_columns:
+                    if item[:-1] in table:
+                        valid_columns.append(table)
+
+        # Check and bind draw function
+        if len(valid_tables) == 1:
+            self.__table = valid_tables[0]
+            self.__yaxis = valid_columns
+            if 'all' in valid_columns:
+                self.__draw_func = self.__draw_table_all_columns
+            else:
+                self.__draw_func = self.__draw_table_columns
+        else:
+            self.__table = valid_tables
+            self.__yaxis = valid_columns
+            self.__draw_func = self.__draw_compare_tables
+
+    def __draw_table_columns(self):
+        """ Show figures of multiple columns in a table """
 
         # Output file
         prefix = '_'.join([self.__trace, self.__table, self.__xaxis])
@@ -194,13 +231,14 @@ class TraceCyclePlot(object):
         output_file(output_name + '.html', title=output_name)
 
         # Get figures
-        figures = self.__figures.plot_t_x_multi(1100, 450, self.__table,
+        figures = self.__figures.plot_t_x_multi(FIGURE_WIDTH, FIGURE_HEIGHT,
+                                                self.__table,
                                                 self.__xaxis, self.__yaxis)
         plot = gridplot(figures)
         show(plot)
 
-    def draw_all(self):
-        """ Show figures from all column """
+    def __draw_table_all_columns(self):
+        """ Show figures of all columns in a table """
 
         # Output file
         output_name = '_'.join(
@@ -208,17 +246,26 @@ class TraceCyclePlot(object):
         output_file(output_name + '.html', title=output_name)
 
         # Get figures
-        figures = self.__figures.plot_t_x_all(1100, 450, self.__table,
+        figures = self.__figures.plot_t_x_all(FIGURE_WIDTH, FIGURE_HEIGHT,
+                                              self.__table,
                                               self.__xaxis)
         plot = gridplot(figures)
         show(plot)
 
-    def draw_compare(self):
-        """ Compare tables """
+    def __draw_compare_tables(self):
+        """ Compare multiple tables """
 
-        max_cycle = 0
+        # Sync X and Y range
+        max_xaxis = 0
         for table in self.__table:
-            max_cycle = max(max_cycle, self.__figures.get_max(table, 'cycle'))
+            max_xaxis = max(max_xaxis, self.__figures.get_max(table, 'cycle'))
+
+        max_yaxis = {}
+        for yaxis in self.__yaxis:
+            max_val = 0
+            for table in self.__table:
+                max_val = max(max_val, self.__figures.get_max(table, yaxis))
+            max_yaxis[yaxis] = max_val
 
         for yaxis in self.__yaxis:
             figures = []
@@ -228,16 +275,21 @@ class TraceCyclePlot(object):
 
             for table in self.__table:
                 xaxis = self.__xaxis
-                color, plot, plot_hist = self.__figures.plot_t_x_y(1100,
-                                                                   450,
-                                                                   table,
-                                                                   xaxis,
-                                                                   yaxis,
-                                                                   max_cycle)
+                plot, plot_hist = self.__figures.plot_t_x_y(FIGURE_WIDTH,
+                                                            FIGURE_HEIGHT,
+                                                            table,
+                                                            xaxis,
+                                                            yaxis,
+                                                            max_xaxis,
+                                                            max_yaxis[yaxis])
                 figures.append([plot, plot_hist])
 
             plot = gridplot(figures)
             show(plot)
+
+    def draw(self):
+        """Call draw function object"""
+        self.__draw_func()
 
 
 def main():
@@ -249,10 +301,6 @@ def main():
     parser.add_argument("-t", "--table", nargs='+',
                         default="cycle_cu_0",
                         help='Choose a table')
-    parser.add_argument("-x", "--xaxis", nargs=1,
-                        default="cycle",
-                        help='Choose a column in the table as x axis. '
-                             'Default to \'cycle\'.')
     parser.add_argument("-y", "--yaxis", nargs='+',
                         default="f",
                         help='Choose columns in the table as y axis. '
@@ -260,35 +308,13 @@ def main():
     args = parser.parse_args()
 
     trace = args.trace[0]
-    table = args.table[0]
-    xaxis = args.xaxis[0]
+    table = args.table
+    xaxis = 'cycle'
     yaxis = args.yaxis
 
     # Traces
-    if len(args.table) > 1:
-        cycle_view = TraceCyclePlot(trace, args.table, xaxis, yaxis)
-        cycle_view.draw_compare()
-        return
-
-    if table != 'all':
-        cycle_view = TraceCyclePlot(trace, table, xaxis, yaxis)
-        if yaxis[0] == 'all':
-            cycle_view.draw_all()
-        else:
-            cycle_view.draw()
-    else:
-        cu_id = 0
-        while 1:
-            table = 'cycle_cu_' + str(cu_id)
-            cycle_view = TraceCyclePlot(trace, table, xaxis, yaxis)
-            try:
-                if yaxis[0] == 'all':
-                    cycle_view.draw_all()
-                else:
-                    cycle_view.draw()
-                cu_id += 1
-            except:
-                return
+    cycle_view = TraceCyclePlot(trace, table, xaxis, yaxis)
+    cycle_view.draw()
 
 
 if __name__ == '__main__':
