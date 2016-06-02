@@ -57,8 +57,8 @@ class DatabaseBuilder(object):
     def __parse_inst(self, cycle, line):
         """ Parse instruction info """
         if 'si.' in line:
-            stage = self.__instructions.parse(cycle, line)
-            self.__cycle_stats.update(cycle, stage)
+            stage, cu_id = self.__instructions.parse(cycle, line)
+            self.__cycle_stats.update(cycle, stage, cu_id)
 
     def __parse_mem(self, cycle, line_num, line):
         """ Parse memory info """

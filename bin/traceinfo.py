@@ -109,19 +109,25 @@ class Instructions(object):
         uid = tr.get_inst_uid(line)
         if tr.parse_inst_exe(line) is not None:
             self.__update_inst_exe(cycle, uid, line)
-            return tr.parse_inst_exe(line).group('stage')
+            stage = tr.parse_inst_exe(line).group('stage')
+            cu_id = tr.parse_inst_exe(line).group('cu')
+            return (stage, cu_id)
 
         # si.new_inst
         elif tr.parse_inst_new(line) is not None:
             self.__update_inst_new(cycle, uid, line)
-            return tr.parse_inst_new(line).group('stage')
+            stage = tr.parse_inst_new(line).group('stage')
+            cu_id = tr.parse_inst_new(line).group('cu')
+            return (stage, cu_id)
 
         # si.end_inst
         elif tr.parse_inst_end(line) is not None:
             self.__update_inst_end(cycle, uid)
-            return 'end'
+            stage = 'end'
+            cu_id = tr.parse_inst_end(line).group('cu')
+            return (stage, cu_id)
 
-        return None
+        return (None, None)
 
     def write_db(self, db_name):
         """ Write inst to database """
@@ -160,15 +166,40 @@ class Instructions(object):
 
 
 class CycleStatistics(object):
-    """CycleStatistics contains stats in each cycle"""
+    """CycleStatistics contains several CycleStatisticsCU objects"""
 
     def __init__(self):
+        self.__cycle_stats = {}
+
+    def update(self, cycle, stage, cu_id):
+        """Update"""
+        if cu_id is None:
+            return
+
+        try:
+            self.__cycle_stats[cu_id].update(cycle, stage)
+        except KeyError:
+            self.__cycle_stats[cu_id] = CycleStatisticsCU(cu_id)
+
+    def write_db(self, db_name):
+        """ Write to database """
+        for cyclecu in self.__cycle_stats.values():
+            cyclecu.write_db(db_name)
+
+
+class CycleStatisticsCU(object):
+    """CycleStatisticsCU contains stats of each cycle for each compute unit"""
+
+    def __init__(self, cu_id):
+        self.__cu_id = cu_id
         self.__cycle_info = {}
         self.__stage_count = {}
 
     def update(self, cycle, stage):
+        """ Update cycle statictics"""
         if stage is not None:
             stage = stage.replace('-', '_')
+
             # Update stage count dictionary
             try:
                 self.__stage_count[stage] += 1
@@ -184,10 +215,9 @@ class CycleStatistics(object):
                     cycle_dict[stage] = 1
             except KeyError:
                 self.__cycle_info[cycle] = {}
+                self.__cycle_info[cycle]['cycle'] = cycle
+                self.__stage_count['cycle'] = 1
                 self.__cycle_info[cycle][stage] = 1
-
-    def dump(self):
-        print self.__cycle_info
 
     def write_db(self, db_name):
         """ Write inst to database """
@@ -197,10 +227,10 @@ class CycleStatistics(object):
         stages = sorted(self.__stage_count.keys())
 
         # Create cycle table, all columns contain integers
-        sql_create_table = 'CREATE TABLE IF NOT EXISTS cycle'
+        table_name = 'cycle_cu_' + str(self.__cu_id)
+        sql_create_table = 'CREATE TABLE IF NOT EXISTS ' + table_name
         columns = ' INTEGER, '.join(stages) + ' INTEGER'
         columns = columns.replace('-', '_')  # - to _
-
         query = sql_create_table + '(' + columns + ')'
         cursor.execute(query)
 
@@ -210,7 +240,7 @@ class CycleStatistics(object):
             columns = ', '.join(cycle.keys())
             placeholders = ':' + ', :'.join(cycle.keys())
             placeholders = placeholders.replace('-', '_')  # - to _
-            query = 'INSERT INTO cycle (%s) VALUES (%s)' % (
+            query = 'INSERT INTO ' + table_name + ' (%s) VALUES (%s)' % (
                 columns, placeholders)
             cursor.execute(query, cycle)
 
