@@ -294,7 +294,7 @@ def main():
     xaxis = 'cycle'
     yaxis = args.yaxis
 
-    # Traces
+    # Plot cycle statistics
     cycle_view = TraceCyclePlot(trace, table, xaxis, yaxis)
     cycle_view.draw()
 
