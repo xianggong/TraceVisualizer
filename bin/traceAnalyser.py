@@ -349,11 +349,10 @@ class Traces(object):
             sql_query = 'SELECT ' + x_column_name + ',' + y_column_name + \
                 ' FROM ' + table_name
             df = pd.read_sql_query(sql_query, trace.get_db())
-            df.fillna(0)
 
             # Plot the main view
             plot_title = trace.get_file_name() + " : " + \
-                str(trace.get_max(table_name, x_column_name)) + " cycles"
+                str(trace.get_max("cycle", "cycle")) + " cycles"
             plot = figure(webgl=True,
                           plot_width=self.plot_width,
                           plot_height=self.plot_height,
@@ -395,22 +394,21 @@ class Traces(object):
             figures.append([plot, plot_hist])
 
             # Add statistic to comparison list
-            # info_compare_list.append(
-            #     trace.get_stat_column_in_table(table_name))
+            info_compare_list.append(
+                trace.get_stat_column_in_table(table_name))
 
         # Plot statistic comparison on the lower right
-        # info_df = pd.concat(info_compare_list)
-        # stats_compare = Bar(info_df,
-        #                     values='data',
-        #                     group='trace',
-        #                     label='catagory',
-        #                     color='color',
-        #                     legend=False,
-        #                     ylabel='Count',
-        #                     title='Statistics')
+        info_df = pd.concat(info_compare_list)
+        stats_compare = Bar(info_df,
+                            values='data',
+                            group='trace',
+                            label='catagory',
+                            color='color',
+                            legend=False,
+                            ylabel='Count',
+                            title='Statistics')
 
-        # figures.append([all_in_one, stats_compare])
-        figures.append([all_in_one])
+        figures.append([all_in_one, stats_compare])
 
         # Plot all figures
         plots = gridplot(figures)

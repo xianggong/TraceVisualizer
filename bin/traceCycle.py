@@ -105,7 +105,8 @@ class TraceCycleFigures(object):
 
         # Plot
         plot_title = table + ' : ' + \
-            str(self.get_max(table, x_column)) + ' / ' + y_column
+            str(self.get_max(table, x_column)) + ' cycles / ' + \
+            str(self.get_count(table, y_column)) + ' ' + y_column
 
         plot = figure(webgl=True,
                       width=width,
@@ -153,15 +154,6 @@ class TraceCycleFigures(object):
             figures_vertical.append([plot, plot_hist])
         return figures_vertical
 
-    def plot_t_x_all(self, width, height,
-                     table, x_column,
-                     x_range=None, y_range=None):
-        """ Plot all columns, return a grid of figures """
-
-        column_list = self.get_column_list(table)
-        return self.plot_t_x_multi(width, height, table, x_column,
-                                   column_list, x_range, y_range)
-
 
 class TraceCyclePlot(object):
     """Draw figures to file"""
@@ -175,8 +167,8 @@ class TraceCyclePlot(object):
         self.__xaxis = xaxis
         self.__yaxis = None
 
-        # Draw function, default to draw selected columns in one table
-        self.__draw_func = self.__draw_table_columns
+        # Draw function
+        self.__draw_func = None
 
         # Check tables
         trace_tables = self.__figures.get_table_list()
@@ -184,6 +176,10 @@ class TraceCyclePlot(object):
         for item in table:
             if '*' not in item and item in trace_tables:
                 valid_tables.append(item)
+            elif item == 'all':
+                for table in trace_tables:
+                    if 'cycle' in table:
+                        valid_tables.append(table)
             else:
                 for table in trace_tables:
                     if item[:-1] in table:
@@ -200,6 +196,9 @@ class TraceCyclePlot(object):
         for item in yaxis:
             if '*' not in item and item in trace_columns:
                 valid_columns.append(item)
+            elif item == 'all':
+                valid_columns = trace_columns
+                break
             else:
                 for table in trace_columns:
                     if item[:-1] in table:
@@ -209,22 +208,19 @@ class TraceCyclePlot(object):
         if len(valid_tables) == 1:
             self.__table = valid_tables[0]
             self.__yaxis = valid_columns
-            if 'all' in valid_columns:
-                self.__draw_func = self.__draw_table_all_columns
-            else:
-                self.__draw_func = self.__draw_table_columns
+            self.__draw_func = self.__draw_single_table
         else:
             self.__table = valid_tables
             self.__yaxis = valid_columns
             self.__draw_func = self.__draw_compare_tables
 
-    def __draw_table_columns(self):
+    def __draw_single_table(self):
         """ Show figures of multiple columns in a table """
 
         # Output file
         prefix = '_'.join([self.__trace, self.__table, self.__xaxis])
         if len(self.__yaxis) > 1:
-            last = 'multi'
+            last = str(len(self.__yaxis)) + '_cols'
         else:
             last = self.__yaxis[0]
         output_name = '_'.join([prefix, last])
@@ -234,21 +230,6 @@ class TraceCyclePlot(object):
         figures = self.__figures.plot_t_x_multi(FIGURE_WIDTH, FIGURE_HEIGHT,
                                                 self.__table,
                                                 self.__xaxis, self.__yaxis)
-        plot = gridplot(figures)
-        show(plot)
-
-    def __draw_table_all_columns(self):
-        """ Show figures of all columns in a table """
-
-        # Output file
-        output_name = '_'.join(
-            [self.__trace, self.__table, self.__xaxis, 'all'])
-        output_file(output_name + '.html', title=output_name)
-
-        # Get figures
-        figures = self.__figures.plot_t_x_all(FIGURE_WIDTH, FIGURE_HEIGHT,
-                                              self.__table,
-                                              self.__xaxis)
         plot = gridplot(figures)
         show(plot)
 
@@ -269,8 +250,9 @@ class TraceCyclePlot(object):
 
         for yaxis in self.__yaxis:
             figures = []
+            num_tables = str(len(self.__table)) + '_tables'
             output_name = '_'.join(
-                [self.__trace, 'multi', self.__xaxis, yaxis])
+                [self.__trace, num_tables, self.__xaxis, yaxis])
             output_file(output_name + '.html', title=output_name)
 
             for table in self.__table:

@@ -27,18 +27,19 @@ REGEX_INST_END = re.compile(ur'si.end_inst id=(?P<id>\d+) cu=(?P<cu>\d+)')
 
 
 # name="A-227"
-REGEX_MEM_UID = re.compile(ur'name="(?P<id>A-\d+)"')
+REGEX_MEM_UID = re.compile(ur'name="A-(?P<id>\d+)"')
 
 # eg: mem.new_access name="A-227" type="load" state="l1-cu02:load" addr=0xc610
-REGEX_MEM_NEW = re.compile(ur'mem.new_access name="(?P<id>A-\d+)" '
-                           r'type="(?P<type>\w+)" state="(?P<loc>[^\"\:]+):'
-                           r'(?P<action>\w+)" addr=(?P<addr>\w+)')
-# eg: mem.access name="A-213" state="mm-1:find_and_lock"
-REGEX_MEM_ACC = re.compile(ur'mem.access name="(?P<id>A-\d+)" '
-                           r'state="(?P<loc>[^\"\:]+):(?P<action>\w+)"')
+REGEX_MEM_NEW = re.compile(ur'mem.new_access name="A-(?P<id>\d+)" '
+                           r'type="(?P<type>\w+)" state="(?P<module>[^\"\:]+):'
+                           r'(?P<action>[^\"\:]+)" addr=(?P<addr>\w+)')
+
+# eg: mem.access name="A-213" state="l1-cu0:find_and_lock"
+REGEX_MEM_ACC = re.compile(ur'mem.access name="A-(?P<id>\d+)" '
+                           r'state="(?P<module>[^\"\:]+):(?P<action>\w+)"')
 
 # eg: mem.end_access name="A-16512"
-REGEX_MEM_END = re.compile(ur'mem.end_access name="(?P<id>A-\d+)"')
+REGEX_MEM_END = re.compile(ur'mem.end_access name="A-(?P<id>\d+)"')
 
 # eg: mem.new_access_block cache="l2-4" access="A-64385" set=37 way=14
 REGEX_MEM_NEW_BLK = re.compile(ur'mem.new_access_block '
@@ -116,6 +117,6 @@ def get_mem_uid(line):
     """Parse memory access unique id"""
     match_obj = parse(REGEX_MEM_UID, line)
     if match_obj:
-        return match_obj.group('name')
+        return match_obj.group('id')
     else:
         return None

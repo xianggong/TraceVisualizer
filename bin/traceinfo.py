@@ -50,6 +50,8 @@ class Instructions(object):
         info = tr.parse_inst_exe(line).groupdict()
         inst['life_full'] += str(cycle) + str(info['stage']) + ', '
 
+        return (info['stage'], info['cu'])
+
     def __update_inst_new(self, cycle, uid, line):
         self.__instructions[uid] = {}
         inst = self.__get_inst_by_uid(uid)
@@ -65,8 +67,11 @@ class Instructions(object):
         inst['scalar_vector'] = inst_scalar_vector(info['asm'])
         inst['unit_action'] = inst_unit_action(info['asm'])
 
-    def __update_inst_end(self, cycle, uid):
+        return (info['stage'], info['cu'])
+
+    def __update_inst_end(self, cycle, uid, line):
         inst = self.__instructions[uid]
+        info = tr.parse_inst_end(line).groupdict()
         inst['length'] = int(cycle) - inst['start']
         inst['life_full'] += str(cycle) + 'end'
 
@@ -103,29 +108,23 @@ class Instructions(object):
         for key, value in count.iteritems():
             self.__instructions[uid][key] = value
 
+        return ('end', info['cu'])
+
     def parse(self, cycle, line):
-        """Parse a line and return current stage"""
-        # si.inst
+        """Parse a line and return (stage, cu_id)"""
         uid = tr.get_inst_uid(line)
+
+        # si.inst
         if tr.parse_inst_exe(line) is not None:
-            self.__update_inst_exe(cycle, uid, line)
-            stage = tr.parse_inst_exe(line).group('stage')
-            cu_id = tr.parse_inst_exe(line).group('cu')
-            return (stage, cu_id)
+            return self.__update_inst_exe(cycle, uid, line)
 
         # si.new_inst
         elif tr.parse_inst_new(line) is not None:
-            self.__update_inst_new(cycle, uid, line)
-            stage = tr.parse_inst_new(line).group('stage')
-            cu_id = tr.parse_inst_new(line).group('cu')
-            return (stage, cu_id)
+            return self.__update_inst_new(cycle, uid, line)
 
         # si.end_inst
         elif tr.parse_inst_end(line) is not None:
-            self.__update_inst_end(cycle, uid)
-            stage = 'end'
-            cu_id = tr.parse_inst_end(line).group('cu')
-            return (stage, cu_id)
+            return self.__update_inst_end(cycle, uid, line)
 
         return (None, None)
 
@@ -243,6 +242,119 @@ class CycleStatisticsCU(object):
             query = 'INSERT INTO ' + table_name + ' (%s) VALUES (%s)' % (
                 columns, placeholders)
             cursor.execute(query, cycle)
+
+        # Save (commit) the changes
+        database.commit()
+
+        # We can also close the connection if we are done with it.
+        # Just be sure any changes have been committed or they will be lost.
+        database.close()
+
+
+class MemoryAccess(object):
+    """Memory access infomation"""
+
+    def __init__(self):
+        self.__mem_access = {}
+        self.__mod_cycle = {}
+
+    def __update_mem_new(self, cycle, uid, line):
+        info = tr.parse_mem_new(line).groupdict()
+
+        # Create an entry in mem access
+        self.__mem_access[uid] = {}
+
+        # Update memory access view
+        mem_access = self.__mem_access[uid]
+        mem_access['uid'] = uid
+        mem_access['start'] = cycle
+        mem_access['miss'] = 0
+        mem_access['module'] = info['module']
+        mem_access['type'] = info['type']
+        mem_access['address'] = info['addr']
+        mem_access['life_full'] = []
+        mem_access_life = str(cycle) + ' ' + \
+            info['module'] + ' ' + info['action']
+        mem_access['life_full'].append(mem_access_life)
+
+        # Create an entry in cycle view
+        module = info['module']
+        self.__mod_cycle[module] = {}
+
+        # Update module cycle view
+        mod_cycle = self.__mod_cycle[module]
+        mod_cycle[cycle] = {}
+        mod_cycle[cycle][info['action']] = 1
+
+    def __update_mem_acc(self, cycle, uid, line):
+        info = tr.parse_mem_acc(line).groupdict()
+
+        # Update memory access view
+        mem_access = self.__mem_access[uid]
+        mem_access_life = str(cycle) + ' ' + \
+            info['module'] + ' ' + info['action']
+        if 'miss' in info['action']:
+            mem_access['miss'] += 1
+        mem_access['life_full'].append(mem_access_life)
+
+        # Update cycle view
+        # module = info['module']
+        # mod_cycle = self.__mod_cycle[module]
+        # try:
+        #     cycle_stat = mod_cycle[cycle]
+        # except KeyError:
+        #     mod_cycle[cycle] = {}
+        #     cycle_stat = mod_cycle[cycle]
+
+    def __update_mem_end(self, cycle, uid):
+        # info = tr.parse_mem_end(line).groupdict()
+
+        mem_access = self.__mem_access[uid]
+        mem_access['length'] = cycle - int(mem_access['start'])
+        mem_access['life_full'].append(str(cycle) + ' end')
+
+        mem_access_life_full = ', '.join(mem_access['life_full'])
+        mem_access['life_full'] = mem_access_life_full
+
+    def parse(self, cycle, line):
+        """Parse a line """
+
+        uid = tr.get_mem_uid(line)
+        # mem.access
+        if tr.parse_mem_acc(line) is not None:
+            self.__update_mem_acc(cycle, uid, line)
+
+        # mem.new_access
+        elif tr.parse_mem_new(line) is not None:
+            self.__update_mem_new(cycle, uid, line)
+
+        # mem.end_access
+        elif tr.parse_mem_end(line) is not None:
+            self.__update_mem_end(cycle, uid)
+
+    def write_db(self, db_name):
+        """ Write inst to database """
+        database = sqlite3.connect(db_name)
+        cursor = database.cursor()
+
+        # Create mem_access tables
+        sql_create_table = 'CREATE TABLE IF NOT EXISTS mem_access'
+        columns = ('uid INTEGER, module TEXT, type TEXT, address TEXT, '
+                   'start INTEGER, length INTEGER, miss INTEGER, '
+                   'life_full TEXT')
+        columns = columns.replace('-', '_')  # - to _
+        query = sql_create_table + '(' + columns + ')'
+        cursor.execute(query)
+
+        # Insert data
+        for index in self.__mem_access:
+            mem_access = self.__mem_access[index]
+            columns = ', '.join(mem_access.keys())
+            placeholders = ':' + ', :'.join(mem_access.keys())
+            placeholders = placeholders.replace('-', '_')  # - to _
+            query = 'INSERT INTO mem_access' + ' (%s) VALUES (%s)' % (
+                columns, placeholders)
+            cursor.execute(query, mem_access)
 
         # Save (commit) the changes
         database.commit()
