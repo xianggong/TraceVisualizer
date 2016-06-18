@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ Trace Cycle visualizer for Multi2Sim """
 
 import argparse

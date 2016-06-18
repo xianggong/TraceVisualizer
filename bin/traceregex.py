@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ This module contains regular expression for trace file """
 
 import re
@@ -24,7 +24,6 @@ REGEX_INST_EXE = re.compile(ur'si.inst id=(?P<id>\d+) cu=(?P<cu>\d+) '
 
 # eg: si.end_inst id=35 cu=3
 REGEX_INST_END = re.compile(ur'si.end_inst id=(?P<id>\d+) cu=(?P<cu>\d+)')
-
 
 # name="A-227"
 REGEX_MEM_UID = re.compile(ur'name="A-(?P<id>\d+)"')

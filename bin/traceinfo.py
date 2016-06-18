@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ This module contains object describe a line in the trace """
 
 import re
@@ -66,7 +66,8 @@ class Instructions(object):
                 self.__instructions[uid][key] = value
         inst['scalar_vector'] = inst_scalar_vector(info['asm'])
         inst['unit_action'] = inst_unit_action(info['asm'])
-
+        if info['cu'] == '11':
+            print inst
         return (info['stage'], info['cu'])
 
     def __update_inst_end(self, cycle, uid, line):
@@ -179,6 +180,7 @@ class CycleStatistics(object):
             self.__cycle_stats[cu_id].update(cycle, stage)
         except KeyError:
             self.__cycle_stats[cu_id] = CycleStatisticsCU(cu_id)
+            self.__cycle_stats[cu_id].update(cycle, stage)
 
     def write_db(self, db_name):
         """ Write to database """

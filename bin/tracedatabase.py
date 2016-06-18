@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ This module contains helper functions to build database """
 
 import gzip

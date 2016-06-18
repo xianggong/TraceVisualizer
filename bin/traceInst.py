@@ -1,15 +1,21 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """ Trace Instruction visualizer for Multi2Sim """
 
 import argparse
 import pandas as pd
 import numpy as np
+from bokeh.models import BoxAnnotation
 from bokeh.charts import Histogram
 from bokeh.plotting import figure, show, output_file
 from bokeh.io import gridplot
 
 import tracemisc as tm
 import tracedatabase as td
+
+try:
+    from intervaltree import Interval, IntervalTree
+except ImportError:
+    print 'Module not found! Install with "pip install intervaltree"'
 
 FIGURE_WIDTH = 1100
 FIGURE_HEIGHT = 450
@@ -86,6 +92,121 @@ class TraceInstFigures(object):
             table_list.append(item[0])
         return sorted(table_list)
 
+    def get_interval(self, dataframe_s, dataframe_e):
+        intervals = []
+
+        if len(dataframe_s) == 0 and len(dataframe_e) == 0:
+            return 0, []
+
+        interval_s = dataframe_s[0]
+        interval_e = dataframe_e[0]
+        intervals.append((interval_s, interval_e))
+        for index, value in enumerate(dataframe_s):
+            interval_s = value
+            interval_e = dataframe_e[index]
+            range_s, range_e = intervals[-1]
+            if range_s <= interval_s < range_e:
+                if interval_e > range_e:
+                    range_e = interval_e
+                    intervals[-1] = (range_s, range_e)
+            elif interval_s > range_e:
+                intervals.append((interval_s, interval_e))
+
+        cycle_count = 0
+        for interval in intervals:
+            interval_s, interval_e = interval
+            cycle_count += interval_e - interval_s
+
+        return cycle_count, intervals
+
+    def get_interval_cu_cond(self, cu_id, condition):
+        sql_query = 'SELECT start, start + length FROM inst WHERE cu=' + \
+            str(cu_id)
+        sql_query += ' AND unit_action ' + condition
+        sql_query += ' ORDER by wf,inst_order'
+        dataframe = pd.read_sql_query(sql_query, self.__database)
+
+        dataframe_s = dataframe['start']
+        dataframe_e = dataframe['start + length']
+
+        # print cu_id, condition, len(dataframe_s), len(dataframe_e)
+        return self.get_interval(dataframe_s, dataframe_e)
+
+    def get_interval_cu(self, cu_id):
+        # MEM LD
+        mem_ld_cycle, mem_ld_interval = self.get_interval_cu_cond(
+            cu_id, 'LIKE "%MEM LD%"')
+
+        mem_ld_interval_tree = IntervalTree(
+            Interval(*iv) for iv in mem_ld_interval)
+
+        # MEM ST
+        mem_st_cycle, mem_st_interval = self.get_interval_cu_cond(
+            cu_id, 'LIKE "%MEM ST%"')
+
+        mem_st_interval_tree = IntervalTree(
+            Interval(*iv) for iv in mem_st_interval)
+
+        # OTHER
+        other_cycle, other_interval = self.get_interval_cu_cond(
+            cu_id, 'NOT LIKE "%MEM LD%"')
+
+        other_interval_tree = IntervalTree(
+            Interval(*iv) for iv in other_interval)
+
+        cycle = self.get_max('inst', 'start + length',
+                             ' WHERE cu=' + str(cu_id))
+        # print cycle, mem_cycle, other_cycle
+
+        info = {}
+        info['mem_ld'] = mem_ld_interval_tree
+        info['mem_st'] = mem_st_interval_tree
+        info['other'] = other_interval_tree
+        info['cycle_all'] = cycle
+        info['cycle_mem_ld'] = mem_ld_cycle
+        info['cycle_mem_st'] = mem_st_cycle
+        info['cycle_other'] = other_cycle
+
+        return info
+
+    def get_interval_cu_all(self):
+        sql_query = 'SELECT DISTINCT cu FROM inst'
+        cu_id = pd.read_sql_query(sql_query, self.__database)
+
+        for cu_id in sorted(cu_id['cu']):
+            self.get_interval_cu(cu_id)
+
+    def get_interval_boxannotation(self, cu_id):
+        info = self.get_interval_cu(cu_id)
+
+        mem_ld_interval_tree = info['mem_ld']
+        mem_st_interval_tree = info['mem_st']
+        other_interval_tree = info['other']
+
+        annotation_box_list = []
+        for interval in mem_ld_interval_tree:
+            start = interval.begin
+            end = interval.end
+            box = BoxAnnotation(left=start, right=end,
+                                fill_alpha=0.1, fill_color='red')
+            annotation_box_list.append(box)
+
+        for interval in mem_st_interval_tree:
+            start = interval.begin
+            end = interval.end
+            box = BoxAnnotation(left=start, right=end,
+                                fill_alpha=0.1, fill_color='blue')
+            annotation_box_list.append(box)
+
+        for interval in other_interval_tree:
+            start = interval.begin
+            end = interval.end
+            box = BoxAnnotation(left=start, right=end,
+                                fill_alpha=0.1, fill_color='green')
+            annotation_box_list.append(box)
+
+        return (annotation_box_list, info)
+
     def plot_timeline_cu(self, width, height,
                          dataframe, cu_id,
                          x_max=None, y_max=None):
@@ -101,12 +222,26 @@ class TraceInstFigures(object):
         if y_max is None:
             y_max = int(self.get_count("inst", "uid", condition))
 
+        # Get box annotation and cycle info
+        boxannotations, info = self.get_interval_boxannotation(cu_id)
+        cycle_all = info['cycle_all']
+        cycle_mem_ld = info['cycle_mem_ld']
+        cycle_mem_st = info['cycle_mem_st']
+        cycle_other = info['cycle_other']
+
+        # Title
+        title = 'cu-' + str(cu_id) + ': '
+        title += str(cycle_mem_ld) + ' mem ld / '
+        title += str(cycle_mem_st) + ' mem st / '
+        title += str(cycle_other) + ' other / '
+        title += str(cycle_all) + ' all'
+
         plot = figure(webgl=True,
                       width=width,
                       height=height,
                       x_range=(0, x_max),
                       y_range=(0, y_max),
-                      title='cu-' + str(cu_id))
+                      title=title)
 
         y_axis = range(len(dataframe.index))
 
@@ -116,6 +251,10 @@ class TraceInstFigures(object):
                      y1=y_axis,
                      line_width=1,
                      color=plot_color)
+
+        # Add box annotation
+        for box in boxannotations:
+            plot.add_layout(box)
 
         # Plot histogram on the right, ignore zeroes
         mean = np.round(dataframe['stall'].mean(), 2)
@@ -144,7 +283,7 @@ class TraceInstFigures(object):
         for cu_id in sorted(cu_id['cu']):
             sql_query = 'SELECT start,length,stall FROM inst WHERE cu=' + \
                 str(cu_id)
-            sql_query += ' ORDER by inst_order'
+            sql_query += ' ORDER by wf,inst_order'
             dataframe = pd.read_sql_query(sql_query, self.__database)
             plot, plot_hist = self.plot_timeline_cu(
                 FIGURE_WIDTH, FIGURE_HEIGHT, dataframe, cu_id, x_max)
@@ -174,7 +313,7 @@ class TraceInstPlot(object):
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(
-        description='Multi2Sim simulation trace cycle analyzer')
+        description='Multi2Sim simulation trace instruction analyzer')
     parser.add_argument('trace', nargs=1,
                         help='Multi2Sim trace files')
     args = parser.parse_args()
