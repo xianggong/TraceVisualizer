@@ -123,7 +123,7 @@ class TraceInstFigures(object):
         sql_query = 'SELECT start, start + length FROM inst WHERE cu=' + \
             str(cu_id)
         sql_query += ' AND unit_action ' + condition
-        sql_query += ' ORDER by wf,inst_order'
+        sql_query += ' ORDER by inst_order'
         dataframe = pd.read_sql_query(sql_query, self.__database)
 
         dataframe_s = dataframe['start']
@@ -250,7 +250,7 @@ class TraceInstFigures(object):
                      x1=dataframe['start'] + dataframe['length'],
                      y1=y_axis,
                      line_width=1,
-                     color=plot_color)
+                     color=dataframe['color'])
 
         # Add box annotation
         for box in boxannotations:
@@ -281,9 +281,9 @@ class TraceInstFigures(object):
 
         x_max = self.get_max("inst", "start + length")
         for cu_id in sorted(cu_id['cu']):
-            sql_query = 'SELECT start,length,stall FROM inst WHERE cu=' + \
-                str(cu_id)
-            sql_query += ' ORDER by wf,inst_order'
+            sql_query = 'SELECT start,length,stall,color FROM inst'
+            sql_query += ' WHERE cu=' + str(cu_id)
+            sql_query += ' ORDER by inst_order'
             dataframe = pd.read_sql_query(sql_query, self.__database)
             plot, plot_hist = self.plot_timeline_cu(
                 FIGURE_WIDTH, FIGURE_HEIGHT, dataframe, cu_id, x_max)

@@ -107,7 +107,7 @@ def get_inst_uid(line):
     """Parse instruction unique id"""
     match_obj = parse(REGEX_INST_UID, line)
     if match_obj:
-        return match_obj.group('cu') + match_obj.group('id')
+        return match_obj.group('cu') + '.' + match_obj.group('id')
     else:
         return None
 

@@ -14,20 +14,21 @@ class DatabaseBuilder(object):
     """ Database builder for trace """
 
     def __init__(self, trace_name):
-        self.__trace_name = None
+        self.__trace_name = os.path.splitext(trace_name)[0]
         self.__trace = None
+
+        self.__cycle = 0
+        self.__instructions = Instructions(self.__get_database_name())
+        self.__memory_access = MemoryAccess(self.__get_database_name())
+        self.__cycle_stats = CycleStatistics(self.__get_database_name())
 
         if trace_name.endswith('.gz'):
             with gzip.open(trace_name, 'rb') as trace_gz:
-                self.__trace_name = os.path.splitext(trace_name)[0]
-                self.__trace = trace_gz.readlines()
+                for line in trace_gz:
+                    self.__parse_trace(line)
         else:
             self.__trace_name = trace_name
             self.__trace = open(trace_name, "r")
-
-        self.__instructions = Instructions()
-        self.__memory_access = MemoryAccess()
-        self.__cycle_stats = CycleStatistics()
 
     def __get_name(self, suffix):
         return self.__trace_name + suffix
@@ -46,27 +47,15 @@ class DatabaseBuilder(object):
         if 'mem.' in line:
             self.__memory_access.parse(cycle, line)
 
-    def __parse_trace(self):
+    def __parse_trace(self, line):
         """ Parse trace and save info to internal tables """
-        # Start from cycle 0
-        cycle = 0
-        for line in self.__trace:
-            if 'clk' in line:
-                # Find which cycle and inc cycle counter
-                cycle = int(re.search(r'(\d+)', line).group(1))
-            self.__parse_inst(cycle, line)
-            self.__parse_mem(cycle, line)
-
-    def __write_database(self):
-        """ Write to database """
-        self.__cycle_stats.write_db(self.__get_database_name())
-        self.__instructions.write_db(self.__get_database_name())
-        self.__memory_access.write_db(self.__get_database_name())
+        if 'clk' in line:
+            self.__cycle = int(re.search(r'(\d+)', line).group(1))
+        self.__parse_inst(self.__cycle, line)
+        self.__parse_mem(self.__cycle, line)
 
     def run(self):
         """ Run parser and save to database """
-        self.__parse_trace()
-        self.__write_database()
         if os.path.isfile(self.__trace_name + ".db"):
             return sqlite3.connect(self.__get_database_name())
 

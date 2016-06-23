@@ -4,44 +4,72 @@
 import re
 import sqlite3
 import traceregex as tr
+import traceISA as isa
 
-
-def inst_scalar_vector(asm):
-    """ Instruction scalar or vector type """
-    if asm.startswith('s'):
-        return 'S'
-    else:
-        return 'V'
-
-
-def inst_unit_action(asm):
-    """ Instruction memory and action """
-    unit_action = '      '
-    if asm.startswith('ds'):
-        if 'read' in asm:
-            return 'LDS LD'
-        elif 'write' in asm:
-            return 'LDS ST'
-        else:
-            return 'LDS OT'
-
-    if 'load' in asm:
-        return 'MEM LD'
-    elif 'store' in asm:
-        return 'MEM ST'
-
-    return unit_action
+DATA_THRESHOLD = 8192
 
 
 class Instructions(object):
-    """Instuctions in trace"""
+    """Instructions in trace"""
 
-    def __init__(self):
-        self.__instructions = {}
+    def __init__(self, db_name):
+        self.__instruction_count = 1
+
+        self.__processing = {}
+        self.__processed = {}
+
+        self.__database = self.__create_db(db_name)
+
+    def __del__(self):
+        # Write remaining data to database
+        if bool(self.__processed):
+            self.__write_db(self.__processed)
+        if bool(self.__processing):
+            self.__write_db(self.__processing)
+
+        # Close database
+        self.__database.close()
+
+    def __create_db(self, db_name):
+        database = sqlite3.connect(db_name)
+        cursor = database.cursor()
+
+        # Create inst table
+        sql_create_table = 'CREATE TABLE IF NOT EXISTS inst'
+        columns = ('uid TEXT, id INTEGER, start INTEGER, length INTEGER, '
+                   'stall INTEGER, fetch INTEGER, issue INTEGER, '
+                   'active INTEGER, cu INTEGER, ib INTEGER, wf INTEGER, '
+                   'wg INTEGER, uop_id INTEGER, scalar_vector TEXT, '
+                   'unit_action TEXT, life_full TEXT, life_lite TEXT, '
+                   'asm TEXT, inst_order INTEGER, color TEXT')
+        query = sql_create_table + '(' + columns + ')'
+        cursor.execute(query)
+
+        # Save (commit) the changes
+        database.commit()
+
+        return database
+
+    def __write_db(self, data_dict):
+        database = self.__database
+        cursor = database.cursor()
+
+        # Insert data
+        for key in data_dict:
+            inst = data_dict[key]
+            columns = ', '.join(inst.keys())
+            placeholders = ':' + ', :'.join(inst.keys())
+            placeholders = placeholders.replace('-', '_')  # - to _
+            query = 'INSERT INTO inst (%s) VALUES (%s)' % (
+                columns, placeholders)
+            cursor.execute(query, inst)
+
+        # Save (commit) the changes
+        database.commit()
 
     def __get_inst_by_uid(self, uid):
-        if uid in self.__instructions:
-            return self.__instructions[uid]
+        if uid in self.__processing:
+            return self.__processing[uid]
         else:
             return None
 
@@ -53,25 +81,26 @@ class Instructions(object):
         return (info['stage'], info['cu'])
 
     def __update_inst_new(self, cycle, uid, line):
-        self.__instructions[uid] = {}
+        self.__processing[uid] = {}
         inst = self.__get_inst_by_uid(uid)
         info = tr.parse_inst_new(line).groupdict()
 
         inst['uid'] = uid
-        inst['inst_order'] = len(self.__instructions)
+        inst['inst_order'] = self.__instruction_count
+        self.__instruction_count += 1
         inst['start'] = cycle
         inst['life_full'] = str(cycle) + str(info['stage']) + ', '
         for key, value in info.iteritems():
             if key != 'stage':
-                self.__instructions[uid][key] = value
-        inst['scalar_vector'] = inst_scalar_vector(info['asm'])
-        inst['unit_action'] = inst_unit_action(info['asm'])
-        if info['cu'] == '11':
-            print inst
+                self.__processing[uid][key] = value
+        inst_info = isa.get_info(info['asm'])
+        inst['scalar_vector'] = inst_info[1]
+        inst['unit_action'] = inst_info[2]
+        inst['color'] = inst_info[3]
         return (info['stage'], info['cu'])
 
     def __update_inst_end(self, cycle, uid, line):
-        inst = self.__instructions[uid]
+        inst = self.__processing[uid]
         info = tr.parse_inst_end(line).groupdict()
         inst['length'] = int(cycle) - inst['start']
         inst['life_full'] += str(cycle) + 'end'
@@ -107,13 +136,21 @@ class Instructions(object):
                 count['active'] += int(item[0])
         inst['life_lite'] = inst_life_string[:-2]
         for key, value in count.iteritems():
-            self.__instructions[uid][key] = value
+            self.__processing[uid][key] = value
+
+        # Move to processed instructions
+        self.__processed[uid] = self.__processing.pop(uid)
+
+        # Flush to database periodically
+        if len(self.__processed) >= DATA_THRESHOLD:
+            self.__write_db(self.__processed)
+            self.__processed.clear()
 
         return ('end', info['cu'])
 
     def parse(self, cycle, line):
         """Parse a line and return (stage, cu_id)"""
-        uid = tr.get_inst_uid(line)
+        uid = str(tr.get_inst_uid(line))
 
         # si.inst
         if tr.parse_inst_exe(line) is not None:
@@ -129,49 +166,15 @@ class Instructions(object):
 
         return (None, None)
 
-    def write_db(self, db_name):
-        """ Write inst to database """
-        database = sqlite3.connect(db_name)
-        cursor = database.cursor()
-
-        # Create inst table
-        sql_create_table = 'CREATE TABLE IF NOT EXISTS inst'
-        columns = ('uid INTEGER, id INTEGER, start INTEGER, length INTEGER, '
-                   'stall INTEGER, fetch INTEGER, issue INTEGER, '
-                   'active INTEGER, cu INTEGER, ib INTEGER, wf INTEGER, '
-                   'wg INTEGER, uop_id INTEGER, scalar_vector TEXT, '
-                   'unit_action TEXT, life_full TEXT, life_lite TEXT, '
-                   'asm TEXT, inst_order INTEGER')
-        columns = columns.replace('-', '_')  # - to _
-
-        query = sql_create_table + '(' + columns + ')'
-        cursor.execute(query)
-
-        # Insert data
-        for index in self.__instructions:
-            inst = self.__instructions[index]
-            columns = ', '.join(inst.keys())
-            placeholders = ':' + ', :'.join(inst.keys())
-            placeholders = placeholders.replace('-', '_')  # - to _
-            query = 'INSERT INTO inst (%s) VALUES (%s)' % (
-                columns, placeholders)
-            cursor.execute(query, inst)
-
-        # Save (commit) the changes
-        database.commit()
-
-        # We can also close the connection if we are done with it.
-        # Just be sure any changes have been committed or they will be lost.
-        database.close()
-
 
 class CycleStatistics(object):
     """CycleStatistics contains several CycleStatisticsCU objects"""
 
-    def __init__(self):
+    def __init__(self, db_name):
+        self.__db_name = db_name
         self.__cycle_stats = {}
 
-    def update(self, cycle, stage, cu_id):
+    def update(self, cycle, stage, cu_id,):
         """Update"""
         if cu_id is None:
             return
@@ -179,95 +182,180 @@ class CycleStatistics(object):
         try:
             self.__cycle_stats[cu_id].update(cycle, stage)
         except KeyError:
-            self.__cycle_stats[cu_id] = CycleStatisticsCU(cu_id)
+            self.__cycle_stats[cu_id] = CycleStatisticsCU(
+                cu_id, self.__db_name)
             self.__cycle_stats[cu_id].update(cycle, stage)
-
-    def write_db(self, db_name):
-        """ Write to database """
-        for cyclecu in self.__cycle_stats.values():
-            cyclecu.write_db(db_name)
 
 
 class CycleStatisticsCU(object):
     """CycleStatisticsCU contains stats of each cycle for each compute unit"""
 
-    def __init__(self, cu_id):
+    def __init__(self, cu_id, db_name):
         self.__cu_id = cu_id
-        self.__cycle_info = {}
-        self.__stage_count = {}
+        self.__cycle = 1
+
+        self.__processing = {}
+        self.__processed = {}
+        self.__stages = {}
+        self.__database = self.__create_db(db_name)
+
+    def __del__(self):
+        # Write remaining data to database
+        if bool(self.__processed):
+            self.__write_db(self.__processed)
+        if bool(self.__processing):
+            self.__write_db(self.__processing)
+
+        # Close database
+        self.__database.close()
+
+    def __get_column_list(self, table):
+        """Get all columns as a list"""
+        cursor = self.__database.cursor()
+        sql_query = "PRAGMA table_info(" + table + ")"
+        column_list = []
+        metadata = cursor.execute(sql_query)
+        for item in metadata:
+            if item[1] != 'cycle':
+                column_list.append(item[1])
+        return sorted(column_list)
+
+    def __create_db(self, db_name):
+        database = sqlite3.connect(db_name)
+        cursor = database.cursor()
+
+        # Create an empty table
+        table_name = 'cycle_cu_' + str(self.__cu_id)
+        query = 'CREATE TABLE IF NOT EXISTS ' + table_name + ' (cycle INTEGER)'
+        cursor.execute(query)
+
+        # Save (commit) the changes
+        database.commit()
+
+        return database
+
+    def __write_db(self, data_dict):
+        database = self.__database
+        cursor = database.cursor()
+
+        table_name = 'cycle_cu_' + str(self.__cu_id)
+
+        # Check if column exists in table
+        database_columns = sorted(self.__get_column_list(table_name))
+        datadict_columns = sorted(self.__stages.keys())
+        diff_columns = set(datadict_columns) - set(database_columns)
+
+        # Add columns to database if necessary
+        if diff_columns is not None:
+            for column in sorted(list(diff_columns)):
+                query = 'ALTER TABLE ' + table_name + ' ADD COLUMN ' + \
+                    column.replace('-', '_') + ' INTEGER'
+                cursor.execute(query)
+            database.commit()
+
+        # Insert data
+        for key in data_dict:
+            data = data_dict[key]
+            columns = ', '.join(data.keys())
+            placeholders = ':' + ', :'.join(data.keys())
+            placeholders = placeholders.replace('-', '_')  # - to _
+            query = 'INSERT INTO ' + table_name + ' (%s) VALUES (%s)' % (
+                columns, placeholders)
+            cursor.execute(query, data)
+
+        # Save (commit) the changes
+        database.commit()
 
     def update(self, cycle, stage):
-        """ Update cycle statictics"""
+        """ Update cycle statistics"""
         if stage is not None:
             stage = stage.replace('-', '_')
-
-            # Update stage count dictionary
-            try:
-                self.__stage_count[stage] += 1
-            except KeyError:
-                self.__stage_count[stage] = 1
+            self.__stages[stage] = 1
 
             # Update cycle info dictionary
             try:
-                cycle_dict = self.__cycle_info[cycle]
+                cycle_dict = self.__processing[cycle]
                 try:
                     cycle_dict[stage] += 1
                 except KeyError:
                     cycle_dict[stage] = 1
             except KeyError:
-                self.__cycle_info[cycle] = {}
-                self.__cycle_info[cycle]['cycle'] = cycle
-                self.__stage_count['cycle'] = 1
-                self.__cycle_info[cycle][stage] = 1
+                self.__processing[cycle] = {}
+                self.__processing[cycle]['cycle'] = cycle
+                self.__processing[cycle][stage] = 1
 
-    def write_db(self, db_name):
-        """ Write inst to database """
+            if cycle != self.__cycle:
+                cycle_info = self.__processing.pop(self.__cycle)
+                self.__processed[self.__cycle] = cycle_info
+                self.__cycle = cycle
+
+            if len(self.__processed) > DATA_THRESHOLD:
+                self.__write_db(self.__processed)
+                self.__processed.clear()
+
+
+class MemoryAccess(object):
+    """Memory access information"""
+
+    def __init__(self, db_name):
+        self.__processing = {}
+        self.__processed = {}
+
+        self.__database = self.__create_db(db_name)
+
+    def __del__(self):
+        # Write remaining data to database
+        if bool(self.__processed):
+            self.__write_db(self.__processed)
+        if bool(self.__processing):
+            self.__write_db(self.__processing)
+
+        # Close database
+        self.__database.close()
+
+    def __create_db(self, db_name):
         database = sqlite3.connect(db_name)
         cursor = database.cursor()
 
-        stages = sorted(self.__stage_count.keys())
-
-        # Create cycle table, all columns contain integers
-        table_name = 'cycle_cu_' + str(self.__cu_id)
-        sql_create_table = 'CREATE TABLE IF NOT EXISTS ' + table_name
-        columns = ' INTEGER, '.join(stages) + ' INTEGER'
+        # Create inst table
+        sql_create_table = 'CREATE TABLE IF NOT EXISTS mem_access'
+        columns = ('uid INTEGER, module TEXT, type TEXT, address TEXT, '
+                   'start INTEGER, length INTEGER, miss INTEGER, '
+                   'life_full TEXT')
         columns = columns.replace('-', '_')  # - to _
         query = sql_create_table + '(' + columns + ')'
         cursor.execute(query)
 
-        # Insert data
-        for index in self.__cycle_info:
-            cycle = self.__cycle_info[index]
-            columns = ', '.join(cycle.keys())
-            placeholders = ':' + ', :'.join(cycle.keys())
-            placeholders = placeholders.replace('-', '_')  # - to _
-            query = 'INSERT INTO ' + table_name + ' (%s) VALUES (%s)' % (
-                columns, placeholders)
-            cursor.execute(query, cycle)
-
         # Save (commit) the changes
         database.commit()
 
-        # We can also close the connection if we are done with it.
-        # Just be sure any changes have been committed or they will be lost.
-        database.close()
+        return database
 
+    def __write_db(self, data_dict):
+        database = self.__database
+        cursor = database.cursor()
 
-class MemoryAccess(object):
-    """Memory access infomation"""
+        # Insert data
+        for key in data_dict:
+            mem_access = data_dict[key]
+            columns = ', '.join(mem_access.keys())
+            placeholders = ':' + ', :'.join(mem_access.keys())
+            placeholders = placeholders.replace('-', '_')  # - to _
+            query = 'INSERT INTO mem_access' + ' (%s) VALUES (%s)' % (
+                columns, placeholders)
+            cursor.execute(query, mem_access)
 
-    def __init__(self):
-        self.__mem_access = {}
-        self.__mod_cycle = {}
+        # Save (commit) the changes
+        database.commit()
 
     def __update_mem_new(self, cycle, uid, line):
         info = tr.parse_mem_new(line).groupdict()
 
         # Create an entry in mem access
-        self.__mem_access[uid] = {}
+        self.__processing[uid] = {}
 
         # Update memory access view
-        mem_access = self.__mem_access[uid]
+        mem_access = self.__processing[uid]
         mem_access['uid'] = uid
         mem_access['start'] = cycle
         mem_access['miss'] = 0
@@ -279,44 +367,32 @@ class MemoryAccess(object):
             info['module'] + ' ' + info['action']
         mem_access['life_full'].append(mem_access_life)
 
-        # Create an entry in cycle view
-        module = info['module']
-        self.__mod_cycle[module] = {}
-
-        # Update module cycle view
-        mod_cycle = self.__mod_cycle[module]
-        mod_cycle[cycle] = {}
-        mod_cycle[cycle][info['action']] = 1
-
     def __update_mem_acc(self, cycle, uid, line):
         info = tr.parse_mem_acc(line).groupdict()
 
         # Update memory access view
-        mem_access = self.__mem_access[uid]
+        mem_access = self.__processing[uid]
         mem_access_life = str(cycle) + ' ' + \
             info['module'] + ' ' + info['action']
         if 'miss' in info['action']:
             mem_access['miss'] += 1
         mem_access['life_full'].append(mem_access_life)
 
-        # Update cycle view
-        # module = info['module']
-        # mod_cycle = self.__mod_cycle[module]
-        # try:
-        #     cycle_stat = mod_cycle[cycle]
-        # except KeyError:
-        #     mod_cycle[cycle] = {}
-        #     cycle_stat = mod_cycle[cycle]
-
     def __update_mem_end(self, cycle, uid):
-        # info = tr.parse_mem_end(line).groupdict()
-
-        mem_access = self.__mem_access[uid]
+        mem_access = self.__processing[uid]
         mem_access['length'] = cycle - int(mem_access['start'])
         mem_access['life_full'].append(str(cycle) + ' end')
 
         mem_access_life_full = ', '.join(mem_access['life_full'])
         mem_access['life_full'] = mem_access_life_full
+
+        # Move to processed instructions
+        self.__processed[uid] = self.__processing.pop(uid)
+
+        # Flush to database periodically
+        if len(self.__processed) >= DATA_THRESHOLD:
+            self.__write_db(self.__processed)
+            self.__processed.clear()
 
     def parse(self, cycle, line):
         """Parse a line """
@@ -333,34 +409,3 @@ class MemoryAccess(object):
         # mem.end_access
         elif tr.parse_mem_end(line) is not None:
             self.__update_mem_end(cycle, uid)
-
-    def write_db(self, db_name):
-        """ Write inst to database """
-        database = sqlite3.connect(db_name)
-        cursor = database.cursor()
-
-        # Create mem_access tables
-        sql_create_table = 'CREATE TABLE IF NOT EXISTS mem_access'
-        columns = ('uid INTEGER, module TEXT, type TEXT, address TEXT, '
-                   'start INTEGER, length INTEGER, miss INTEGER, '
-                   'life_full TEXT')
-        columns = columns.replace('-', '_')  # - to _
-        query = sql_create_table + '(' + columns + ')'
-        cursor.execute(query)
-
-        # Insert data
-        for index in self.__mem_access:
-            mem_access = self.__mem_access[index]
-            columns = ', '.join(mem_access.keys())
-            placeholders = ':' + ', :'.join(mem_access.keys())
-            placeholders = placeholders.replace('-', '_')  # - to _
-            query = 'INSERT INTO mem_access' + ' (%s) VALUES (%s)' % (
-                columns, placeholders)
-            cursor.execute(query, mem_access)
-
-        # Save (commit) the changes
-        database.commit()
-
-        # We can also close the connection if we are done with it.
-        # Just be sure any changes have been committed or they will be lost.
-        database.close()
